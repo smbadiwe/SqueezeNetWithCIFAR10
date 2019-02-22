@@ -1,0 +1,12 @@
+
+build/
+temp/
+test/
+.idea/
+*.pyc
+model/
+dist/
+*.egg-info
+.idea
+.vscode
+__pycache__

@@ -1,0 +1,2 @@
+from keras_squeezenet.squeezenet_lite import SqueezeNet
+from keras_squeezenet.version import __version__
