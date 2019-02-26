@@ -84,8 +84,8 @@ class KerasCifar10:
             model.load_weights(checkpoint_path)
             with open(path.join(checkpoint_folder, "epoch.txt"), "r") as f:
                 last_epoch_ran = f.read()
-            print("\tInitial epoch: %d" % last_epoch_ran)
             last_epoch_ran = int(last_epoch_ran)
+            print("\tInitial epoch: %d" % last_epoch_ran)
         else:
             print("****Creating folder", checkpoint_folder)
             makedirs(checkpoint_folder, exist_ok=True)
@@ -120,18 +120,22 @@ class KerasCifar10:
                             callbacks=callbacks)
         # history = model.fit(train_data, train_labels, epochs=self.epochs)
         # Test model
+        print("Training done. Evaluating model")
         test_loss, test_acc = model.evaluate(eval_data, eval_labels, batch_size=self.batch_size, verbose=1)
 
         print("test_loss: {}. test_acc: {}".format(test_loss, test_acc))
 
         # confusion matrix
         preds = model.predict(eval_data, batch_size=self.batch_size, verbose=1)
+        preds = np.argmax(preds, 1)
+        model.summary()
 
-        print("eval_labels: {}. preds: {}".format(eval_labels.shape, preds.shape))
-        with keras.backend.get_session() as sess:
-            conf_mat = tf.confusion_matrix(eval_labels, preds)
-            conf_mat = sess.run(conf_mat)
-
+        print("eval_labels: {}. max: {}.\npreds: {}. max: {}.".format(eval_labels.shape, np.max(eval_labels), preds.shape, np.max(preds)))
+        # with keras.backend.get_session() as sess:
+        #     conf_mat = tf.confusion_matrix(eval_labels, preds)
+        #     conf_mat = sess.run(conf_mat)
+        from sklearn.metrics import confusion_matrix
+        confusion_matrix(eval_data, preds)
         # clear memory
         keras.backend.clear_session()
 
