@@ -35,7 +35,8 @@ class KerasCifar10:
         print("Load training and eval data")
         (train_data, train_labels), (test_data, test_labels) = keras.datasets.cifar10.load_data()
 
-        # # do not use tf.cast
+        # do not use tf.cast
+
         # train_data = np.asarray(train_data, dtype=np.float32)
         # train_labels = np.asarray(train_labels, dtype=np.int32)
         # test_data = np.asarray(test_data, dtype=np.float32)
@@ -48,11 +49,13 @@ class KerasCifar10:
         tf.summary.image("input_train", train_data)
         tf.summary.image("input_test", test_data)
 
-        # # one-hot encoding for the labels
-        # train_labels = keras.utils.to_categorical(train_labels)
-        # test_labels = keras.utils.to_categorical(test_labels)
-        # train_data /= 255.0
-        # test_data /= 255.0
+        # one-hot encoding for the labels
+        train_labels = keras.utils.to_categorical(train_labels, 10)
+        test_labels = keras.utils.to_categorical(test_labels, 10)
+        train_data = train_data.astype('float32')
+        test_data = test_data.astype('float32')
+        train_data /= 255.0
+        test_data /= 255.0
 
         return (train_data, train_labels), (test_data, test_labels)
 
@@ -64,10 +67,10 @@ class KerasCifar10:
         # Build model
         model = SqueezeNet(input_shape=train_data[0].shape, weights=None, classes=10)
         # model = get_model(train_data[0].shape)
-        # model.summary()
+        model.summary()
 
         model.compile(optimizer='adam',
-                      loss='sparse_categorical_crossentropy',
+                      loss='categorical_crossentropy',
                       metrics=['accuracy'])
         # Train model
         if self.log_dir is not None:

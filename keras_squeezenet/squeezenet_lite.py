@@ -42,7 +42,7 @@ def fire_module(x, fire_id, squeeze=16, expand=64):
 
 def SqueezeNet(include_top=True, weights='imagenet',
                input_tensor=None, input_shape=None,
-               classes=1000):
+               classes=10):
     """Instantiates the SqueezeNet architecture.
     """
 
@@ -89,8 +89,11 @@ def SqueezeNet(include_top=True, weights='imagenet',
     # x = Dropout(0.5, name='drop9')(x)
     x = Convolution2D(1000, (1, 1), padding='valid', name='conv10')(x)
     x = Activation('relu', name='relu_conv10')(x)
+    x = Convolution2D(classes, (1, 1), padding='valid', name='conv10b')(x)
+    x = Activation('relu', name='relu_conv10b')(x)
     x = GlobalAveragePooling2D(name="avgpool10")(x)
-    x = Dense(classes, name="softmax-10")(x)
+    # x = Dense(classes, name="softmax-10")(x)
+    # x = Activation('relu', name='relu_10')(x)
     x = Activation('softmax', name='softmax')(x)
 
     # Ensure that the model takes into account
