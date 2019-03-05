@@ -93,59 +93,66 @@ def computational_graph(class_size):
 
 
 def main():
+    import os
     with tf.device("/cpu:0"):
         (x_train, y_train), (x_validation, y_validation) = load_data()
 
-    model = Model(*juxt(identity, computational_graph(y_train.shape[1]))(Input(shape=x_train.shape[1:])))
-    model.compile(loss='categorical_crossentropy', optimizer=SGD(momentum=0.9), metrics=['accuracy'])
+    batch_size = 32
+    epochs = 200
 
-    model.summary()
+    model_file = './results/model.h5'
+    if os.path.exists(model_file):
+        model = load_model(model_file)
+        with tf.device("/cpu:0"):
+            validation_data = ImageDataGenerator(featurewise_center=True, featurewise_std_normalization=True)
+
+    else:
+        model = Model(*juxt(identity, computational_graph(y_train.shape[1]))(Input(shape=x_train.shape[1:])))
+        model.compile(loss='categorical_crossentropy', optimizer=SGD(momentum=0.9), metrics=['accuracy'])
+
+        with tf.device("/cpu:0"):
+            train_data = ImageDataGenerator(featurewise_center=True, featurewise_std_normalization=True, width_shift_range=0.125, height_shift_range=0.125, horizontal_flip=True)
+            validation_data = ImageDataGenerator(featurewise_center=True, featurewise_std_normalization=True)
+
+        for data in (train_data, validation_data):
+            data.fit(x_train)  # 実用を考えると、x_validationでのfeaturewiseのfitは無理だと思う……。
+
+        results = model.fit_generator(train_data.flow(x_train, y_train, batch_size=batch_size),
+                                      steps_per_epoch=x_train.shape[0] // batch_size,
+                                      epochs=epochs,
+                                      callbacks=[LearningRateScheduler(partial(getitem, tuple(take(epochs, concat(repeat(0.01, 1), repeat(0.1, 99), repeat(0.01, 50), repeat(0.001))))))],
+                                      validation_data=validation_data.flow(x_validation, y_validation, batch_size=batch_size),
+                                      validation_steps=x_validation.shape[0] // batch_size)
+
+        with open('./results/history.pickle', 'wb') as f:
+            pickle.dump(results.history, f)
+        save_model(model, model_file)
+
     try:
         with tf.device("/cpu:0"):
-            plot_model(model, to_file='./results/model.png')
+            model.summary()
+            # plot_model(model, to_file='./results/model.png')
     except Exception as ex:
         print("plot_model failed with error:", repr(ex), "\nMoving on...")
 
-    with tf.device("/cpu:0"):
-        train_data = ImageDataGenerator(featurewise_center=True, featurewise_std_normalization=True, width_shift_range=0.125, height_shift_range=0.125, horizontal_flip=True)
-        validation_data = ImageDataGenerator(featurewise_center=True, featurewise_std_normalization=True)
-
-    for data in (train_data, validation_data):
-        data.fit(x_train)  # 実用を考えると、x_validationでのfeaturewiseのfitは無理だと思う……。
-
-    batch_size = 32
-    epochs = 250
-
-    # history_file = './results/history.pickle'
-    # results_file = './results/model.h5'
-    # import os
-    # if os.path.exists(history_file):
-    #     with open(history_file, 'wb') as f:
-    #         history = pickle.load(f)
-    # else:
-    results = model.fit_generator(train_data.flow(x_train, y_train, batch_size=batch_size),
-                                  steps_per_epoch=x_train.shape[0] // batch_size,
-                                  epochs=epochs,
-                                  callbacks=[LearningRateScheduler(partial(getitem, tuple(take(epochs, concat(repeat(0.01, 1), repeat(0.1, 99), repeat(0.01, 50), repeat(0.001))))))],
-                                  validation_data=validation_data.flow(x_validation, y_validation, batch_size=batch_size),
-                                  validation_steps=x_validation.shape[0] // batch_size)
-
     # Confution Matrix and Classification Report
-    Y_pred = model.predict_generator(validation_data.flow(x_validation, y_validation, batch_size=batch_size), x_validation.shape[0]// batch_size)
+    # Y_pred = model.predict_generator(validation_data.flow(x_validation, None, batch_size=batch_size), 1 + (x_validation.shape[0]// batch_size))
+    Y_pred = model.predict(x_validation, batch_size=batch_size)
+    # print("Y_pred:", Y_pred.shape)
+    # print("x_validation:", x_validation.shape)
+    # print("y_validation:", y_validation.shape)
     y_pred = np.argmax(Y_pred, axis=1)
     y_valid = np.argmax(y_validation, axis=1)
-    print(np.argmax(y_validation, axis=1))
-    print(len(y_pred))
-
-    with open('./results/history.pickle', 'wb') as f:
-        pickle.dump(results.history, f)
-    save_model(model, './results/model.h5')
+    # print("y_pred:", y_pred.shape)
+    # print("y_valid:", y_valid.shape)
+    # print(np.argmax(y_validation, axis=1))
+    # print(len(y_pred))
 
     print('Confusion Matrix')
     # plt.imshow((y_valid, y_pred))
     # plt.show()
     cm = (confusion_matrix(y_valid, y_pred))
-    print(confusion_matrix(y_valid, y_pred))
+    print(cm)
     fig, ax = plot_confusion_matrix(conf_mat=cm,
                                     colorbar=True,
                                     show_absolute=False,
