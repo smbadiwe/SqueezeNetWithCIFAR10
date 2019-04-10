@@ -1,5 +1,5 @@
 from keras_applications.imagenet_utils import _obtain_input_shape
-from keras.layers import concatenate,Input, BatchNormalization, Convolution2D, MaxPooling2D, Activation, GlobalAveragePooling2D, Dense, Lambda
+from keras.layers import concatenate, Dropout, Input, BatchNormalization, Conv2D, MaxPooling2D, Activation, GlobalAveragePooling2D, Dense, Lambda
 from keras.datasets import cifar10
 from keras.utils import to_categorical
 from keras.engine.topology import get_source_inputs
@@ -41,27 +41,20 @@ def fire_module(x, fire_id, squeeze=16, expand=64):
     else:
         channel_axis = 3
 
-    x = Convolution2D(squeeze, (1, 1), padding='valid', name=s_id + sq1x1)(x)
+    x = Conv2D(squeeze, (1, 1), activation='relu', padding='valid', kernel_initializer='glorot_uniform', name=s_id + sq1x1)(x)
     x = BatchNormalization()(x)
-    x = Activation('relu', name=s_id + relu + sq1x1)(x)
 
-    left = Convolution2D(expand, (1, 1), padding='valid', name=s_id + exp1x1)(x)
-    left = BatchNormalization()(left)
-    left = Activation('relu', name=s_id + relu + exp1x1)(left)
+    left = Conv2D(expand, (1, 1), activation='relu', padding='valid', kernel_initializer='glorot_uniform', name=s_id + exp1x1)(x)
 
-    right = Convolution2D(expand, (3, 3), padding='same', name=s_id + exp3x3)(x)
-    right = BatchNormalization()(right)
-    right = Activation('relu', name=s_id + relu + exp3x3)(right)
+    right = Conv2D(expand, (3, 3), activation='relu', padding='same', kernel_initializer='glorot_uniform', name=s_id + exp3x3)(x)
 
     x = concatenate([left, right], axis=channel_axis, name=s_id + 'concat')
     return x
 
 
-# Original SqueezeNet from paper.
-
-def SqueezeNet(include_top=True,
-               input_tensor=None, input_shape=None,
-               classes=10):
+def SqueezeNet_v1(include_top=True,
+                  input_tensor=None, input_shape=None,
+                  classes=10):
     """Instantiates the SqueezeNet architecture.
     """
     input_shape = _obtain_input_shape(input_shape,
@@ -78,7 +71,7 @@ def SqueezeNet(include_top=True,
         else:
             img_input = input_tensor
 
-    x = Convolution2D(96, (3, 3), padding='same', name='conv1')(img_input)
+    x = Conv2D(96, (3, 3), padding='same', name='conv1')(img_input)
     x = Activation('relu', name='relu_conv1')(x)
     # x = MaxPooling2D(pool_size=(2, 2), name='pool1')(x)
 
@@ -105,6 +98,54 @@ def SqueezeNet(include_top=True,
 
     # Ensure that the model takes into account
     # any potential predecessors of `input_tensor`.
+    if input_tensor is not None:
+        inputs = get_source_inputs(input_tensor)
+    else:
+        inputs = img_input
+
+    model = Model(inputs, x, name='squeezenet')
+
+    return model
+
+
+def SqueezeNet(include_top=True,
+               input_tensor=None, input_shape=None,
+               classes=10):
+    """Instantiates the SqueezeNet architecture.
+    """
+    input_shape = _obtain_input_shape(input_shape,
+                                      default_size=32,
+                                      min_size=32,
+                                      data_format=K.image_data_format(),
+                                      require_flatten=include_top)
+
+    if input_tensor is None:
+        img_input = Input(shape=input_shape)
+    else:
+        if not K.is_keras_tensor(input_tensor):
+            img_input = Input(tensor=input_tensor, shape=input_shape)
+        else:
+            img_input = input_tensor
+
+    x = Conv2D(96, kernel_size=(3, 3), strides=(2, 2), padding='same', name='conv1', activation='relu')(img_input)
+    x = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), name='pool1')(x)
+    x = BatchNormalization()(x)
+
+    x = fire_module(x, fire_id=1, squeeze=32, expand=128)
+    x = MaxPooling2D(pool_size=(3, 3), strides=(2, 2), name='pool2')(x)
+
+    x = fire_module(x, fire_id=2, squeeze=48, expand=192)
+    x = fire_module(x, fire_id=3, squeeze=48, expand=192)
+    x = fire_module(x, fire_id=4, squeeze=48, expand=192)
+    x = MaxPooling2D(pool_size=(3, 3), strides=(2, 2), name='pool3')(x)
+    x = Dropout(0.5, name='dropout')(x)
+
+    x = Conv2D(classes, kernel_size=(1, 1), strides=(1, 1), padding='same', name='conv2', activation='relu')(x)
+    x = BatchNormalization()(x)
+    x = GlobalAveragePooling2D(name="avgpool")(x)
+    # x = Dense(classes, activation='softmax', name="softmax-10")(x)
+    x = Activation('softmax')(x)
+
     if input_tensor is not None:
         inputs = get_source_inputs(input_tensor)
     else:
@@ -150,20 +191,22 @@ def run():
 
     optimizer = Adam(lr=0.001)
 
-    # input_shape = Input(shape=x_train.shape[1:])
+    model = SqueezeNet(classes=num_classes)
     squeezenet_model_file = './sqz_log/model.h5'
     if os.path.exists(squeezenet_model_file):
-        model = load_model(squeezenet_model_file)
+        model.layers.pop()
+        model = Model(name="sqzn_no_softmax", inputs=model.input, outputs=model.layers[-1].output)
+        model.load_weights(squeezenet_model_file, by_name=True)
+        # model.load_weights(squeezenet_model_file, by_name=True)
     else:
         # train a new SqueezeNet
-        model = SqueezeNet(classes=num_classes)
-
         model.compile(loss='categorical_crossentropy', optimizer=optimizer, metrics=['accuracy'])
 
-        train_data = ImageDataGenerator(featurewise_center=True, featurewise_std_normalization=True,
-                                        width_shift_range=0.125, height_shift_range=0.125, horizontal_flip=True)
-        validation_data = ImageDataGenerator(featurewise_center=True, featurewise_std_normalization=True)
-
+        # train_data = ImageDataGenerator(featurewise_center=True, featurewise_std_normalization=True,
+        #                                 width_shift_range=0.125, height_shift_range=0.125, horizontal_flip=True)
+        # validation_data = ImageDataGenerator(featurewise_center=True, featurewise_std_normalization=True)
+        train_data = ImageDataGenerator()
+        validation_data = ImageDataGenerator()
         for data in (train_data, validation_data):
             data.fit(x_train)
 
@@ -185,9 +228,8 @@ def run():
         save_model(model, squeezenet_model_file)
 
     # Build the siamese architecture
-    model.layers.pop()
-    model_cut = Model(name="sqzn_no_softmax", inputs=model.input, outputs=model.layers[-1].output)
-    model_cut.load_weights(squeezenet_model_file, by_name=True)
+    # model_cut = Model(name="sqzn_no_softmax", inputs=model.input, outputs=model.layers[-1].output)
+    # model_cut.load_weights(squeezenet_model_file, by_name=True)
     # with tf.device("/cpu:0"):
     #     model_cut.summary()
 
@@ -195,15 +237,15 @@ def run():
 
     im_in1 = Input(shape=input_shape)
     im_in2 = Input(shape=input_shape)
-    feat_x1 = model_cut(im_in1)
-    feat_x2 = model_cut(im_in2)
+    feat_x1 = model(im_in1)
+    feat_x2 = model(im_in2)
     lambda_merge = Lambda(euclidean_distance, output_shape=(1,))([feat_x1, feat_x2])
 
     siamese = Model(name="siamese", inputs=[im_in1, im_in2], outputs=lambda_merge)
     with tf.device("/cpu:0"):
         siamese.summary()
 
-    optimizer = SGD(momentum=0.9)
+    optimizer = RMSprop()  # SGD(momentum=0.9)
     siamese.compile(optimizer=optimizer, loss=contrastive_loss, metrics=[accuracy])
 
     def make_img_pair(identical, from_train):
