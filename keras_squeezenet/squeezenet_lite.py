@@ -4,8 +4,8 @@ from keras.datasets import cifar10
 from keras.utils import to_categorical
 from keras.engine.topology import get_source_inputs
 import os
-import glob
 
+# import glob
 # import numpy as np
 # import matplotlib.pyplot as plt
 # from mlxtend.plotting import plot_confusion_matrix
@@ -14,7 +14,7 @@ import pickle
 from funcy import concat, partial, repeat, take
 from keras.callbacks import LearningRateScheduler, TensorBoard, ModelCheckpoint
 from keras.models import Model, save_model, load_model
-from keras.optimizers import Adam
+from keras.optimizers import Adam, RMSprop, SGD
 from keras.preprocessing.image import ImageDataGenerator
 from operator import getitem
 import tensorflow as tf
@@ -123,7 +123,13 @@ def euclidean_distance(inputs):
 
 def contrastive_loss(y_true, y_pred):
     margin = 1.
-    return K.mean((1. - y_true) * K.square(y_pred) + y_true * K.square(K.maximum(margin - y_pred, 0.)))
+    return K.mean(y_true * K.square(y_pred) + (1 - y_true) * K.square(K.maximum(margin - y_pred, 0)))
+
+
+def accuracy(y_true, y_pred):
+    """Compute classification accuracy with a fixed threshold on distances.
+    """
+    return K.mean(K.equal(y_true, K.cast(K.abs(y_pred) >= 0.5, y_true.dtype)))
 
 
 def run():
@@ -197,7 +203,8 @@ def run():
     with tf.device("/cpu:0"):
         siamese.summary()
 
-    siamese.compile(optimizer=optimizer, loss=contrastive_loss, metrics=['accuracy'])
+    optimizer = SGD(momentum=0.9)
+    siamese.compile(optimizer=optimizer, loss=contrastive_loss, metrics=[accuracy])
 
     def make_img_pair(identical, from_train):
         """Select the image pairs"""
@@ -232,22 +239,26 @@ def run():
 
     def generator(from_train):
         while True:
-            X = []
-            y = []
+            X = [[None, None]] * batch_size
+            y = [[None]] * batch_size
+            indexes = np.arange(batch_size)
             identical = True
-            for _ in range(batch_size):
-                X.append(make_img_pair(identical, from_train))
-                y.append(np.array([0. if identical else 1.]))
+            for i in indexes:
+                X[i] = make_img_pair(identical, from_train)
+                y[i] = [1 if identical else 0]
                 identical = not identical
-            X = np.asarray(X)
-            y = np.asarray(y)
+            np.random.shuffle(indexes)
+            X = np.asarray(X)[indexes]
+            y = np.asarray(y)[indexes]
+            # print("generator: from_train:", from_train, " - X:", X.shape, "- y:", y.shape)
             yield [X[:, 0], X[:, 1]], y
 
+    siamese_model_file = "./siam_log/siamese.h5"
     epochs = 100
     callbacks = [
         LearningRateScheduler(partial(getitem, tuple(take(epochs, concat(
             repeat(0.01, 1), repeat(0.1, 99), repeat(0.01, 50), repeat(0.001)))))),
-        ModelCheckpoint(filepath=squeezenet_model_file),
+        ModelCheckpoint(filepath=siamese_model_file),
         TensorBoard(log_dir="./siam_log", batch_size=batch_size)
     ]
     outputs = siamese.fit_generator(generator(from_train=True), initial_epoch=0,
@@ -258,7 +269,7 @@ def run():
 
     with open('./siam_log/history.pickle', 'wb') as f:
         pickle.dump(outputs.history, f)
-    save_model(siamese, './siam_log/siamese.h5')
+    save_model(siamese, siamese_model_file)
 
 
 if __name__ == "__main__":
